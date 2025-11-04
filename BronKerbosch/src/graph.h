@@ -360,6 +360,56 @@ public:
         return total_cliques;
     }
 
+    // Basic Bron-Kerbosch without degeneracy ordering
+    void bron_kerbosch_basic() {
+        rev_idx.clear();
+        rev_idx.resize(num_vertices, -1);
+
+        // Start with R = {}, P = all vertices, X = {}
+        // We iterate over all vertices (similar to degeneracy but in natural order)
+        for (int i = 0; i < num_vertices; i++) {
+            int v = i;
+            vector<int> P, X;
+
+            // For basic version without degeneracy:
+            // X = neighbors with index < i
+            // P = neighbors with index > i
+            for (int u : adj_list[v]) {
+                if (u < i)
+                    X.push_back(u);
+                else
+                    P.push_back(u);
+            }
+
+            v_list.clear();
+            v_list.insert(v_list.end(), X.begin(), X.end());
+            v_list.insert(v_list.end(), P.begin(), P.end());
+
+            for (int j = 0; j < v_list.size(); j++) rev_idx[v_list[j]] = j;
+
+            for (int u : v_list) {
+                auto& neighbors = adj_list[u];
+                int write = 0;
+
+                for (int read = 0; read < (int)neighbors.size(); ++read) {
+                    int w = neighbors[read];
+                    if (rev_idx[w] >= X.size() && rev_idx[w] < v_list.size()) {
+                        std::swap(neighbors[write], neighbors[read]);
+                        ++write;
+                    }
+                }
+            }
+
+            clique.push_back(v);
+            bron_kerbosch_pivot(0, X.size(), v_list.size());
+            clique.pop_back();
+
+            for (int j = 0; j < v_list.size(); j++) {
+                rev_idx[v_list[j]] = -1;
+            }
+        }
+    }
+
     void bron_kerbosch_degeneracy() {
         rev_idx.clear();
         rev_idx.resize(num_vertices, -1);

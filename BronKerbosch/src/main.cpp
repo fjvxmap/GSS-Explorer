@@ -11,6 +11,7 @@ int main(int argc, char* argv[]) {
     // Check if CSV export is requested
     bool export_csv = false;
     string csv_filename = "search_tree.csv";
+    bool use_degeneracy = true;  // Use degeneracy ordering by default
 
     for (int i = 1; i < argc; i++) {
         string arg = argv[i];
@@ -19,6 +20,8 @@ int main(int argc, char* argv[]) {
             if (i + 1 < argc && argv[i + 1][0] != '-') {
                 csv_filename = argv[++i];
             }
+        } else if (arg == "--no-degeneracy" || arg == "-n") {
+            use_degeneracy = false;
         }
     }
 
@@ -36,8 +39,14 @@ int main(int argc, char* argv[]) {
     }
 
     auto start = chrono::high_resolution_clock::now();
-    g.dgn_order_cal();
-    g.bron_kerbosch_degeneracy();
+    if (use_degeneracy) {
+        cout << "Using degeneracy ordering\n";
+        g.dgn_order_cal();
+        g.bron_kerbosch_degeneracy();
+    } else {
+        cout << "Using basic Bron-Kerbosch (no degeneracy ordering)\n";
+        g.bron_kerbosch_basic();
+    }
     auto end = chrono::high_resolution_clock::now();
     chrono::duration<double> elapsed = end - start;
 
