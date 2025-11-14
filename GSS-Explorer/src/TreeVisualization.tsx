@@ -358,7 +358,7 @@ export function TreeVisualization({
     node
       .filter((d) => !!(d.data.children && d.data.children.length > 0))
       .append('circle')
-      .attr('r', 4)
+      .attr('r', 5)
       .attr('fill', (d) =>
         collapsedNodes.has(d.data.node_id) ? '#fff' : '#333'
       )
@@ -369,6 +369,20 @@ export function TreeVisualization({
         event.stopPropagation();
         handleCollapseToggle(d.data.node_id);
       });
+
+    // Add +/- symbols for collapsed/expanded nodes
+    node
+      .filter((d) => !!(d.data.children && d.data.children.length > 0))
+      .append('text')
+      .attr('text-anchor', 'middle')
+      .attr('dy', '0.35em')
+      .style('font-size', '10px')
+      .style('font-weight', 'bold')
+      .style('fill', (d) =>
+        collapsedNodes.has(d.data.node_id) ? '#333' : '#fff'
+      )
+      .style('pointer-events', 'none')
+      .text((d) => (collapsedNodes.has(d.data.node_id) ? '+' : '−'));
 
     // Add text labels
     node
