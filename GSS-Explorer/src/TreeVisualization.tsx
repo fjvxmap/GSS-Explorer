@@ -10,11 +10,17 @@ interface TreeVisualizationProps {
   hidePruned: boolean;
 }
 
+// Extended type for D3 hierarchy with collapsed state
+type HierarchyNodeWithCollapse = d3.HierarchyPointNode<TreeNode> & {
+  _children?: HierarchyNodeWithCollapse[];
+};
+
 export function TreeVisualization({ data, maxStep, currentStep, onNodeClick, hidePruned }: TreeVisualizationProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+  const [collapsedNodes, setCollapsedNodes] = useState<Set<number>>(new Set());
 
   // Update dimensions based on container size
   useEffect(() => {
@@ -32,6 +38,43 @@ export function TreeVisualization({ data, maxStep, currentStep, onNodeClick, hid
     return () => window.removeEventListener('resize', updateDimensions);
   }, []);
 
+  // Helper function to get node color
+  const getNodeColor = (d: d3.HierarchyPointNode<TreeNode>) => {
+    if (d.data.pruned_by_pivot) return '#e74c3c';
+
+    // Base colors for each depth
+    const depthHues = [210, 145, 30, 270, 170, 25]; // Blue, Green, Orange, Purple, Teal, Orange-red
+    const hue = depthHues[d.depth % depthHues.length];
+
+    // Saturation based on cliques_in_subtree (0-100%)
+    const maxCliques = 50; // Adjust based on your data
+    const saturation = Math.min(100, 40 + (d.data.cliques_in_subtree / maxCliques) * 60);
+    const lightness = 50;
+
+    return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+  };
+
+  // Helper function to get node radius based on cliques_in_subtree
+  const getNodeRadius = (d: d3.HierarchyPointNode<TreeNode>) => {
+    const baseRadius = 6;
+    const maxRadius = 20;
+    const cliques = d.data.cliques_in_subtree || 1;
+    return Math.min(baseRadius + Math.sqrt(cliques) * 2, maxRadius);
+  };
+
+  // Toggle collapse state
+  const handleCollapseToggle = (nodeId: number) => {
+    setCollapsedNodes(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(nodeId)) {
+        newSet.delete(nodeId);
+      } else {
+        newSet.add(nodeId);
+      }
+      return newSet;
+    });
+  };
+
   useEffect(() => {
     if (!svgRef.current || !data) return;
 
@@ -42,9 +85,9 @@ export function TreeVisualization({ data, maxStep, currentStep, onNodeClick, hid
     // Clear only the content group, not the whole SVG
     svg.selectAll('.content-group').remove();
 
-    const centerX = dimensions.width / 2;
-    const centerY = dimensions.height / 2;
-    const radius = Math.min(dimensions.width, dimensions.height) / 2 - 50;
+    const margin = { top: 20, right: 120, bottom: 20, left: 80 };
+    const width = dimensions.width - margin.left - margin.right;
+    const height = dimensions.height - margin.top - margin.bottom;
 
     const g = svg.append('g')
       .attr('class', 'content-group');
@@ -52,172 +95,200 @@ export function TreeVisualization({ data, maxStep, currentStep, onNodeClick, hid
     // Apply current zoom transform if it exists
     if (zoomRef.current) {
       const currentTransform = d3.zoomTransform(svg.node()!);
-      g.attr('transform', `translate(${centerX + currentTransform.x},${centerY + currentTransform.y}) scale(${currentTransform.k})`);
+      g.attr('transform', `translate(${margin.left + currentTransform.x},${margin.top + currentTransform.y}) scale(${currentTransform.k})`);
     } else {
-      g.attr('transform', `translate(${centerX},${centerY})`);
+      g.attr('transform', `translate(${margin.left},${margin.top})`);
     }
 
-    // Convert to hierarchy - ALWAYS use all children to maintain positions
-    const root = d3.hierarchy(data, d => d.children);
+    // Convert to hierarchy - filter children based on visibility
+    const filterChildren = (node: TreeNode): TreeNode | null => {
+      // Check visibility based on creation_order
+      if (node.creation_order > currentStep) return null;
+      if (hidePruned && node.pruned_by_pivot) return null;
 
-    // Use cliques_in_subtree to determine node size
-    root.sum(d => d.cliques_in_subtree || 1);
+      const filtered: TreeNode = { ...node };
 
-    // Create partition layout (Sunburst - radial) on FULL tree
-    const partition = d3.partition<TreeNode>()
-      .size([2 * Math.PI, radius]);
+      // Recursively filter children
+      if (node.children && node.children.length > 0) {
+        const visibleChildren = node.children
+          .map(filterChildren)
+          .filter((child): child is TreeNode => child !== null);
 
-    const partitionData = partition(root);
-
-    // Get ALL nodes from full tree (for stable positions)
-    const allNodes = partitionData.descendants();
-
-    // Rescale angles so depth 1+ nodes use full 360 degrees
-    const depth1Nodes = allNodes.filter(d => d.depth === 1);
-    if (depth1Nodes.length > 0) {
-      const minAngle = Math.min(...depth1Nodes.map(d => d.x0));
-      const maxAngle = Math.max(...depth1Nodes.map(d => d.x1));
-      const angleRange = maxAngle - minAngle;
-
-      if (angleRange > 0 && angleRange < 2 * Math.PI) {
-        // Rescale all non-root nodes to use full 360 degrees
-        allNodes.filter(d => d.depth > 0).forEach(d => {
-          d.x0 = ((d.x0 - minAngle) / angleRange) * 2 * Math.PI;
-          d.x1 = ((d.x1 - minAngle) / angleRange) * 2 * Math.PI;
-        });
+        if (visibleChildren.length > 0) {
+          filtered.children = visibleChildren;
+        } else {
+          delete filtered.children;
+        }
       }
-    }
 
-    // NOW filter for rendering based on creation_order and pruned status
-    const visibleNodes = allNodes.filter(d => {
-      if (d.data.creation_order > currentStep) return false;
-      if (hidePruned && d.data.pruned_by_pivot) return false;
-      return true;
-    });
-
-    // Separate root and other nodes
-    const rootNode = visibleNodes.find(d => d.depth === 0);
-    const nonRootNodes = visibleNodes.filter(d => d.depth > 0);
-
-    // Color scale with saturation based on cliques
-    const getNodeColor = (d: d3.HierarchyRectangularNode<TreeNode>) => {
-      if (d.data.pruned_by_pivot) return '#e74c3c';
-
-      // Base colors for each depth
-      const depthHues = [210, 145, 30, 270, 170, 25]; // Blue, Green, Orange, Purple, Teal, Orange-red
-      const hue = depthHues[d.depth % depthHues.length];
-
-      // Saturation based on cliques_in_subtree (0-100%)
-      const maxCliques = 50; // Adjust based on your data
-      const saturation = Math.min(100, 40 + (d.data.cliques_in_subtree / maxCliques) * 60);
-      const lightness = 50;
-
-      return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+      return filtered;
     };
 
-    // Draw root node as a circle in the center
-    if (rootNode) {
-      g.append('circle')
-        .attr('r', rootNode.y1)
-        .attr('fill', getNodeColor(rootNode))
-        .attr('stroke', '#fff')
-        .attr('stroke-width', 0.3)
-        .style('opacity', 0.9)
-        .style('cursor', 'pointer')
-        .on('click', (event) => {
-          event.stopPropagation();
-          if (onNodeClick) {
-            onNodeClick(rootNode.data);
-          }
-        })
-        .on('mouseenter', function() {
-          d3.select(this).style('opacity', 1).attr('stroke-width', 1.5);
-        })
-        .on('mouseleave', function() {
-          d3.select(this).style('opacity', 0.9).attr('stroke-width', 0.3);
-        });
-    }
+    const filteredData = filterChildren(data);
+    if (!filteredData) return;
 
-    // Arc generator for sunburst
-    const arc = d3.arc<d3.HierarchyRectangularNode<TreeNode>>()
-      .startAngle(d => d.x0)
-      .endAngle(d => d.x1)
-      .innerRadius(d => d.y0)
-      .outerRadius(d => d.y1);
+    const root = d3.hierarchy(filteredData, d => {
+      // Hide children if node is collapsed
+      if (collapsedNodes.has(d.node_id)) {
+        return undefined;
+      }
+      return d.children;
+    }) as HierarchyNodeWithCollapse;
 
-    // Draw arcs for non-root nodes
-    const cells = g.selectAll('.cell')
-      .data(nonRootNodes)
+    // Store reference to hidden children for toggle functionality
+    const storeCollapsedChildren = (node: HierarchyNodeWithCollapse) => {
+      if (collapsedNodes.has(node.data.node_id) && node.data.children) {
+        node._children = d3.hierarchy(node.data, d => d.children).children as HierarchyNodeWithCollapse[] | undefined;
+      }
+      if (node.children) {
+        node.children.forEach(storeCollapsedChildren);
+      }
+    };
+    storeCollapsedChildren(root);
+
+    // Create tree layout
+    const treeLayout = d3.tree<TreeNode>()
+      .size([height, width])
+      .separation((a, b) => (a.parent === b.parent ? 1 : 1.2));
+
+    const treeData = treeLayout(root);
+    const nodes = treeData.descendants();
+    const links = treeData.links();
+
+    // Create link path generator (horizontal orientation)
+    const linkGenerator = d3.linkHorizontal<d3.HierarchyPointLink<TreeNode>, d3.HierarchyPointNode<TreeNode>>()
+      .x(d => d.y)
+      .y(d => d.x);
+
+    // Helper to check if a node leads to any pruned descendants
+    const hasOnlyPrunedDescendants = (node: d3.HierarchyPointNode<TreeNode>): boolean => {
+      if (!node.children || node.children.length === 0) {
+        return node.data.pruned_by_pivot;
+      }
+      return node.children.every(hasOnlyPrunedDescendants);
+    };
+
+    const duration = 300; // Transition duration in ms
+
+    // Draw links
+    const linkGroup = g.append('g')
+      .attr('class', 'links')
+      .attr('fill', 'none')
+      .attr('stroke-width', 1.5);
+
+    const link = linkGroup.selectAll('path')
+      .data(links)
+      .enter()
+      .append('path')
+      .attr('d', linkGenerator)
+      .attr('stroke', d => hasOnlyPrunedDescendants(d.target) ? '#e74c3c' : '#999')
+      .attr('stroke-dasharray', d => hasOnlyPrunedDescendants(d.target) ? '4,4' : '0')
+      .style('opacity', 0);
+
+    // Transition links in
+    link.transition()
+      .duration(duration)
+      .style('opacity', 0.6);
+
+    // Draw nodes
+    const nodeGroup = g.append('g')
+      .attr('class', 'nodes');
+
+    const node = nodeGroup.selectAll('g')
+      .data(nodes)
       .enter()
       .append('g')
-      .attr('class', 'cell')
+      .attr('transform', d => `translate(${d.y},${d.x})`)
       .style('cursor', 'pointer')
-      .on('click', (event, d) => {
-        event.stopPropagation();
-        if (onNodeClick) {
-          onNodeClick(d.data);
-        }
-      });
+      .style('opacity', 0);
 
-    cells.append('path')
-      .attr('d', arc)
+    // Transition nodes in
+    node.transition()
+      .duration(duration)
+      .style('opacity', 1);
+
+    // Add circles for nodes
+    node.append('circle')
+      .attr('r', d => getNodeRadius(d))
       .attr('fill', d => getNodeColor(d))
       .attr('stroke', '#fff')
-      .attr('stroke-width', 0.3)
+      .attr('stroke-width', 2)
       .style('opacity', 0.9)
+      .on('click', function(event, d) {
+        event.stopPropagation();
+
+        // Check if node has children to collapse
+        const hasChildren = d.data.children && d.data.children.length > 0;
+
+        if (event.altKey && hasChildren) {
+          // Alt+click to toggle collapse
+          handleCollapseToggle(d.data.node_id);
+        } else {
+          // Regular click for selection
+          if (onNodeClick) {
+            onNodeClick(d.data);
+          }
+        }
+      })
       .on('mouseenter', function() {
-        d3.select(this).style('opacity', 1).attr('stroke-width', 1.5);
+        d3.select(this).style('opacity', 1).attr('stroke-width', 3);
       })
       .on('mouseleave', function() {
-        d3.select(this).style('opacity', 0.9).attr('stroke-width', 0.3);
+        d3.select(this).style('opacity', 0.9).attr('stroke-width', 2);
       });
 
-    // Add text labels for larger arcs
-    cells.filter(d => {
-      const angle = d.x1 - d.x0;
-      const radiusSpan = d.y1 - d.y0;
-      return angle > 0.05 && radiusSpan > 20;
-    })
-      .append('text')
-      .attr('transform', d => {
-        const angle = (d.x0 + d.x1) / 2 * 180 / Math.PI - 90;
-        const radius = (d.y0 + d.y1) / 2;
-        return `rotate(${angle}) translate(${radius},0) rotate(${angle > 90 ? 180 : 0})`;
+    // Add collapse/expand indicator for nodes with children
+    node.filter(d => !!(d.data.children && d.data.children.length > 0))
+      .append('circle')
+      .attr('r', 4)
+      .attr('fill', d => collapsedNodes.has(d.data.node_id) ? '#fff' : '#333')
+      .attr('stroke', '#333')
+      .attr('stroke-width', 1.5)
+      .style('cursor', 'pointer')
+      .on('click', function(event, d) {
+        event.stopPropagation();
+        handleCollapseToggle(d.data.node_id);
+      });
+
+    // Add text labels
+    node.append('text')
+      .attr('dy', d => {
+        // Position text above nodes with children indicator
+        return (d.data.children && d.data.children.length > 0) ? -getNodeRadius(d) - 8 : 3;
       })
-      .attr('text-anchor', 'middle')
-      .attr('dominant-baseline', 'middle')
-      .style('font-size', '9px')
-      .style('fill', '#fff')
+      .attr('x', d => getNodeRadius(d) + 8)
+      .attr('text-anchor', 'start')
+      .style('font-size', '11px')
+      .style('fill', '#333')
       .style('pointer-events', 'none')
-      .style('font-weight', 'bold')
+      .style('font-weight', '500')
       .text(d => {
         const clique = d.data.current_clique;
-        if (clique && clique.length < 15) return clique;
-        return `${d.data.node_id}`;
+        if (clique && clique.length < 30) return clique;
+        return `Node ${d.data.node_id}`;
       });
 
-    // Initialize zoom if not already done, or update the zoom target
+    // Initialize zoom if not already done
     if (!zoomRef.current) {
       zoomRef.current = d3.zoom<SVGSVGElement, unknown>()
-        .scaleExtent([0.5, 5])
+        .scaleExtent([0.3, 3])
         .on('zoom', (event) => {
           const transform = event.transform;
-          // Apply zoom to all .content-group elements
           svg.selectAll('.content-group')
-            .attr('transform', `translate(${centerX + transform.x},${centerY + transform.y}) scale(${transform.k})`);
+            .attr('transform', `translate(${margin.left + transform.x},${margin.top + transform.y}) scale(${transform.k})`);
         });
 
       svg.call(zoomRef.current);
     } else {
-      // Don't reset zoom, just update the zoom callback to work with new content
+      // Update zoom callback to work with new margins
       zoomRef.current.on('zoom', (event) => {
         const transform = event.transform;
         svg.selectAll('.content-group')
-          .attr('transform', `translate(${centerX + transform.x},${centerY + transform.y}) scale(${transform.k})`);
+          .attr('transform', `translate(${margin.left + transform.x},${margin.top + transform.y}) scale(${transform.k})`);
       });
     }
 
-  }, [data, currentStep, dimensions, onNodeClick, hidePruned]);
+  }, [data, currentStep, dimensions, onNodeClick, hidePruned, collapsedNodes]);
 
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%' }}>
