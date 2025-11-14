@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import * as d3 from 'd3';
 import type { TreeNode } from './types';
 
@@ -21,8 +21,27 @@ export function TreeVisualization({ data, maxStep, currentStep, onNodeClick, hid
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const [collapsedNodes, setCollapsedNodes] = useState<Set<number>>(new Set());
+  const initialDataRef = useRef<TreeNode | null>(null);
+  const prevCollapsedNodesRef = useRef<Set<number>>(new Set());
+  const prevNodeCountRef = useRef<number>(0);
 
-  // Update dimensions based on container size
+  // Auto-collapse depth-1 nodes on initial load if there are many
+  useEffect(() => {
+    if (data && data !== initialDataRef.current) {
+      initialDataRef.current = data;
+
+      // Count direct children of root
+      const rootChildren = data.children || [];
+
+      // If there are more than 20 direct children, collapse them all initially
+      if (rootChildren.length > 20) {
+        const depth1NodeIds = rootChildren.map(child => child.node_id);
+        setCollapsedNodes(new Set(depth1NodeIds));
+      }
+    }
+  }, [data]);
+
+  // Update dimensions based on container size with debouncing
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -33,9 +52,19 @@ export function TreeVisualization({ data, maxStep, currentStep, onNodeClick, hid
       }
     };
 
+    // Debounce resize events to avoid excessive re-renders
+    let timeoutId: number;
+    const debouncedUpdate = () => {
+      clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(updateDimensions, 150);
+    };
+
     updateDimensions();
-    window.addEventListener('resize', updateDimensions);
-    return () => window.removeEventListener('resize', updateDimensions);
+    window.addEventListener('resize', debouncedUpdate);
+    return () => {
+      window.removeEventListener('resize', debouncedUpdate);
+      clearTimeout(timeoutId);
+    };
   }, []);
 
   // Helper function to get node color
@@ -62,8 +91,8 @@ export function TreeVisualization({ data, maxStep, currentStep, onNodeClick, hid
     return Math.min(baseRadius + Math.sqrt(cliques) * 2, maxRadius);
   };
 
-  // Toggle collapse state
-  const handleCollapseToggle = (nodeId: number) => {
+  // Toggle collapse state - memoized to prevent unnecessary re-renders
+  const handleCollapseToggle = useCallback((nodeId: number) => {
     setCollapsedNodes(prev => {
       const newSet = new Set(prev);
       if (newSet.has(nodeId)) {
@@ -73,10 +102,40 @@ export function TreeVisualization({ data, maxStep, currentStep, onNodeClick, hid
       }
       return newSet;
     });
-  };
+  }, []);
+
+  // Memoize the filtering function to avoid recreating it on every render
+  const filterChildren = useCallback((node: TreeNode): TreeNode | null => {
+    // Check visibility based on creation_order
+    if (node.creation_order > currentStep) return null;
+    if (hidePruned && node.pruned_by_pivot) return null;
+
+    const filtered: TreeNode = { ...node };
+
+    // Recursively filter children
+    if (node.children && node.children.length > 0) {
+      const visibleChildren = node.children
+        .map(filterChildren)
+        .filter((child): child is TreeNode => child !== null);
+
+      if (visibleChildren.length > 0) {
+        filtered.children = visibleChildren;
+      } else {
+        delete filtered.children;
+      }
+    }
+
+    return filtered;
+  }, [currentStep, hidePruned]);
+
+  // Memoize filtered data to avoid recomputing on every render
+  const filteredData = useMemo(() => {
+    if (!data) return null;
+    return filterChildren(data);
+  }, [data, filterChildren]);
 
   useEffect(() => {
-    if (!svgRef.current || !data) return;
+    if (!svgRef.current || !filteredData) return;
 
     const svg = d3.select(svgRef.current)
       .attr('width', dimensions.width)
@@ -86,46 +145,9 @@ export function TreeVisualization({ data, maxStep, currentStep, onNodeClick, hid
     svg.selectAll('.content-group').remove();
 
     const margin = { top: 20, right: 120, bottom: 20, left: 80 };
-    const width = dimensions.width - margin.left - margin.right;
-    const height = dimensions.height - margin.top - margin.bottom;
 
     const g = svg.append('g')
       .attr('class', 'content-group');
-
-    // Apply current zoom transform if it exists
-    if (zoomRef.current) {
-      const currentTransform = d3.zoomTransform(svg.node()!);
-      g.attr('transform', `translate(${margin.left + currentTransform.x},${margin.top + currentTransform.y}) scale(${currentTransform.k})`);
-    } else {
-      g.attr('transform', `translate(${margin.left},${margin.top})`);
-    }
-
-    // Convert to hierarchy - filter children based on visibility
-    const filterChildren = (node: TreeNode): TreeNode | null => {
-      // Check visibility based on creation_order
-      if (node.creation_order > currentStep) return null;
-      if (hidePruned && node.pruned_by_pivot) return null;
-
-      const filtered: TreeNode = { ...node };
-
-      // Recursively filter children
-      if (node.children && node.children.length > 0) {
-        const visibleChildren = node.children
-          .map(filterChildren)
-          .filter((child): child is TreeNode => child !== null);
-
-        if (visibleChildren.length > 0) {
-          filtered.children = visibleChildren;
-        } else {
-          delete filtered.children;
-        }
-      }
-
-      return filtered;
-    };
-
-    const filteredData = filterChildren(data);
-    if (!filteredData) return;
 
     const root = d3.hierarchy(filteredData, d => {
       // Hide children if node is collapsed
@@ -146,14 +168,57 @@ export function TreeVisualization({ data, maxStep, currentStep, onNodeClick, hid
     };
     storeCollapsedChildren(root);
 
-    // Create tree layout
+    // Create tree layout with nodeSize for better spacing
+    // nodeSize allocates fixed space per node to prevent overlap
+    const verticalSpacing = 60; // Vertical space per node
+    const horizontalSpacing = 200; // Horizontal space per level
+
     const treeLayout = d3.tree<TreeNode>()
-      .size([height, width])
-      .separation((a, b) => (a.parent === b.parent ? 1 : 1.2));
+      .nodeSize([verticalSpacing, horizontalSpacing])
+      .separation((a, b) => {
+        // Dynamic separation based on node sizes
+        const radiusA = getNodeRadius(a);
+        const radiusB = getNodeRadius(b);
+        const textPadding = 40; // Account for text labels
+
+        // Calculate minimum separation needed to prevent overlap
+        const minSeparation = (radiusA + radiusB + textPadding) / verticalSpacing;
+
+        // Siblings need more space, cousins even more
+        return a.parent === b.parent
+          ? Math.max(1.5, minSeparation)
+          : Math.max(2.0, minSeparation * 1.3);
+      });
 
     const treeData = treeLayout(root);
     const nodes = treeData.descendants();
     const links = treeData.links();
+
+    // Calculate actual tree bounds for dynamic sizing
+    let minX = Infinity, maxX = -Infinity;
+    let minY = Infinity, maxY = -Infinity;
+
+    nodes.forEach(d => {
+      const nodeRadius = getNodeRadius(d);
+      minX = Math.min(minX, d.x - nodeRadius);
+      maxX = Math.max(maxX, d.x + nodeRadius);
+      minY = Math.min(minY, d.y);
+      maxY = Math.max(maxY, d.y);
+    });
+
+    // Calculate required dimensions
+    const treeHeight = maxX - minX;
+
+    // Update SVG dimensions to fit tree with margins
+    const totalHeight = treeHeight + margin.top + margin.bottom + 100;
+    svg.attr('height', Math.max(dimensions.height, totalHeight));
+
+    // Always center the tree vertically in the available space
+    const availableHeight = Math.max(dimensions.height, totalHeight);
+    const verticalOffset = (availableHeight - treeHeight) / 2 - minX;
+
+    // Apply initial transform with vertical offset
+    g.attr('transform', `translate(${margin.left},${verticalOffset})`);
 
     // Create link path generator (horizontal orientation)
     const linkGenerator = d3.linkHorizontal<d3.HierarchyPointLink<TreeNode>, d3.HierarchyPointNode<TreeNode>>()
@@ -168,7 +233,18 @@ export function TreeVisualization({ data, maxStep, currentStep, onNodeClick, hid
       return node.children.every(hasOnlyPrunedDescendants);
     };
 
-    const duration = 300; // Transition duration in ms
+    // Determine if we should animate based on what changed
+    // Only animate for collapse/expand operations, not timeline updates
+    const collapsedNodesChanged = prevCollapsedNodesRef.current.size !== collapsedNodes.size ||
+      Array.from(collapsedNodes).some(id => !prevCollapsedNodesRef.current.has(id));
+
+    const shouldAnimate = collapsedNodesChanged && nodes.length === prevNodeCountRef.current;
+
+    // Update refs for next render
+    prevCollapsedNodesRef.current = new Set(collapsedNodes);
+    prevNodeCountRef.current = nodes.length;
+
+    const duration = shouldAnimate ? 300 : 0; // Animate only for collapse/expand
 
     // Draw links
     const linkGroup = g.append('g')
@@ -288,16 +364,17 @@ export function TreeVisualization({ data, maxStep, currentStep, onNodeClick, hid
       });
     }
 
-  }, [data, currentStep, dimensions, onNodeClick, hidePruned, collapsedNodes]);
+  }, [filteredData, dimensions, onNodeClick, collapsedNodes, handleCollapseToggle]);
 
   return (
-    <div ref={containerRef} style={{ width: '100%', height: '100%' }}>
+    <div ref={containerRef} style={{ width: '100%', height: '100%', overflow: 'auto' }}>
       <svg
         ref={svgRef}
         style={{
           border: '1px solid #ddd',
           background: '#fafafa',
-          display: 'block'
+          display: 'block',
+          minHeight: '100%'
         }}
       />
     </div>
