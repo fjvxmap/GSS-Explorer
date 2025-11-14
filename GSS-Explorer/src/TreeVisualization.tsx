@@ -31,6 +31,8 @@ export function TreeVisualization({
   const prevCollapsedNodesRef = useRef<Set<number>>(new Set());
   const prevNodeCountRef = useRef<number>(0);
   const gRef = useRef<SVGGElement | null>(null);
+  const hasInitializedTransform = useRef<boolean>(false);
+  const [dimensionsReady, setDimensionsReady] = useState(false);
 
   // Auto-collapse depth-1 nodes on initial load if there are many
   useEffect(() => {
@@ -56,6 +58,11 @@ export function TreeVisualization({
       if (containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect();
         setDimensions({ width: rect.width, height: rect.height });
+        // Mark dimensions as ready after first measurement
+        if (!dimensionsReady && rect.width > 0 && rect.height > 0) {
+          // Small delay to ensure dimensions are stable
+          setTimeout(() => setDimensionsReady(true), 50);
+        }
       }
     };
 
@@ -72,7 +79,7 @@ export function TreeVisualization({
       window.removeEventListener('resize', debouncedUpdate);
       clearTimeout(timeoutId);
     };
-  }, []);
+  }, [dimensionsReady]);
 
   // Helper function to get node color
   const getNodeColor = (d: d3.HierarchyPointNode<TreeNode>) => {
@@ -159,7 +166,7 @@ export function TreeVisualization({
   }, [data, filterChildren]);
 
   useEffect(() => {
-    if (!svgRef.current || !filteredData) return;
+    if (!svgRef.current || !filteredData || !dimensionsReady) return;
 
     const svg = d3
       .select(svgRef.current)
@@ -416,31 +423,34 @@ export function TreeVisualization({
         });
 
       svg.call(zoomRef.current);
-
-      // Set initial position by applying a transform
-      const initialTransform = d3.zoomIdentity.translate(
-        margin.left,
-        verticalOffset
-      );
-      svg.call(zoomRef.current.transform, initialTransform);
-      currentTransformRef.current = initialTransform;
     } else {
       // Update zoom callback
       zoomRef.current.on('zoom', (event) => {
         currentTransformRef.current = event.transform;
         g.attr('transform', event.transform.toString());
       });
+    }
 
-      // Recalculate transform preserving scale and relative pan
-      const oldTransform = currentTransformRef.current;
-      const newTransform = d3.zoomIdentity
-        .translate(margin.left, verticalOffset)
-        .scale(oldTransform.k)
-        .translate(
-          (oldTransform.x - margin.left) / oldTransform.k,
-          (oldTransform.y - verticalOffset) / oldTransform.k
-        );
-      svg.call(zoomRef.current.transform, newTransform);
+    // Only apply initial centering transform on first render
+    if (!hasInitializedTransform.current) {
+      // Position to show the root node in viewport
+      // Root is at y=0, so we need to translate it into the visible area
+      // Center it horizontally at a reasonable starting position
+      const initialX = Math.max(100, dimensions.width * 0.15); // Start from 15% of width or 100px minimum
+      const initialY = verticalOffset;
+
+      const initialTransform = d3.zoomIdentity.translate(initialX, initialY);
+
+      // Apply transform immediately to the group for instant centering
+      g.attr('transform', initialTransform.toString());
+
+      // Update zoom behavior and ref without animation on initial render
+      svg.call(zoomRef.current.transform, initialTransform);
+      currentTransformRef.current = initialTransform;
+      hasInitializedTransform.current = true;
+    } else {
+      // On subsequent renders, apply the current transform to maintain position
+      g.attr('transform', currentTransformRef.current.toString());
     }
   }, [
     filteredData,
@@ -448,6 +458,7 @@ export function TreeVisualization({
     onNodeClick,
     collapsedNodes,
     handleCollapseToggle,
+    dimensionsReady,
   ]);
 
   return (
