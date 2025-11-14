@@ -30,6 +30,7 @@ export function TreeVisualization({
   const initialDataRef = useRef<TreeNode | null>(null);
   const prevCollapsedNodesRef = useRef<Set<number>>(new Set());
   const prevNodeCountRef = useRef<number>(0);
+  const gRef = useRef<SVGGElement | null>(null);
 
   // Auto-collapse depth-1 nodes on initial load if there are many
   useEffect(() => {
@@ -113,6 +114,17 @@ export function TreeVisualization({
     });
   }, []);
 
+  // Recenter the view
+  const handleRecenter = useCallback(() => {
+    if (!svgRef.current || !zoomRef.current) return;
+
+    const svg = d3.select(svgRef.current);
+    svg
+      .transition()
+      .duration(500)
+      .call(zoomRef.current.transform, d3.zoomIdentity);
+  }, []);
+
   // Memoize the filtering function to avoid recreating it on every render
   const filterChildren = useCallback(
     (node: TreeNode): TreeNode | null => {
@@ -160,6 +172,7 @@ export function TreeVisualization({
     const margin = { top: 20, right: 120, bottom: 20, left: 80 };
 
     const g = svg.append('g').attr('class', 'content-group');
+    gRef.current = g.node();
 
     const root = d3.hierarchy(filteredData, (d) => {
       // Hide children if node is collapsed
@@ -432,8 +445,39 @@ export function TreeVisualization({
   return (
     <div
       ref={containerRef}
-      style={{ width: '100%', height: '100%', overflow: 'auto' }}
+      style={{
+        width: '100%',
+        height: '100%',
+        overflow: 'auto',
+        position: 'relative',
+      }}
     >
+      <button
+        onClick={handleRecenter}
+        style={{
+          position: 'absolute',
+          top: '10px',
+          right: '10px',
+          zIndex: 10,
+          padding: '8px 16px',
+          backgroundColor: '#fff',
+          border: '1px solid #ddd',
+          borderRadius: '4px',
+          cursor: 'pointer',
+          fontSize: '14px',
+          fontWeight: '500',
+          boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+          color: 'black',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.backgroundColor = '#f0f0f0';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.backgroundColor = '#fff';
+        }}
+      >
+        Recenter
+      </button>
       <svg
         ref={svgRef}
         style={{
