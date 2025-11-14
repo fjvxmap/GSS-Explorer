@@ -305,7 +305,7 @@ function App() {
   return (
     <div
       style={{
-        height: '100vh',
+        maxHeight: '100dvh',
         width: '100%',
         display: 'flex',
         flexDirection: 'column',
@@ -376,7 +376,7 @@ function App() {
             </label>
           </div>
 
-          <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+          <div style={{ flex: 1, minHeight: 0 }}>
             <TreeVisualization
               data={treeData}
               maxStep={maxStep}
@@ -394,7 +394,6 @@ function App() {
             gap: '15px',
             minHeight: 0,
             height: '100%',
-            overflow: 'hidden',
           }}
         >
           {graphData && (
@@ -409,7 +408,6 @@ function App() {
             style={{
               height: 'calc(55% - 7.5px)',
               flexShrink: 0,
-              overflow: 'hidden',
             }}
           >
             <NodeInfoPanel node={selectedNode} solutions={solutions} />
