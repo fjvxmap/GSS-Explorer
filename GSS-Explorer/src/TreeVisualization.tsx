@@ -248,15 +248,6 @@ export function TreeVisualization({
     const availableHeight = Math.max(dimensions.height, totalHeight);
     const verticalOffset = (availableHeight - treeHeight) / 2 - minX;
 
-    // Apply transform preserving current zoom state
-    const currentTransform = currentTransformRef.current;
-    g.attr(
-      'transform',
-      `translate(${margin.left + currentTransform.x},${
-        verticalOffset + currentTransform.y
-      }) scale(${currentTransform.k})`
-    );
-
     // Create link path generator (horizontal orientation)
     const linkGenerator = d3
       .linkHorizontal<
@@ -406,33 +397,36 @@ export function TreeVisualization({
         .zoom<SVGSVGElement, unknown>()
         .scaleExtent([0.3, 3])
         .on('zoom', (event) => {
-          const transform = event.transform;
-          currentTransformRef.current = transform;
-          svg
-            .selectAll('.content-group')
-            .attr(
-              'transform',
-              `translate(${margin.left + transform.x},${
-                verticalOffset + transform.y
-              }) scale(${transform.k})`
-            );
+          currentTransformRef.current = event.transform;
+          g.attr('transform', event.transform.toString());
         });
 
       svg.call(zoomRef.current);
+
+      // Set initial position by applying a transform
+      const initialTransform = d3.zoomIdentity.translate(
+        margin.left,
+        verticalOffset
+      );
+      svg.call(zoomRef.current.transform, initialTransform);
+      currentTransformRef.current = initialTransform;
     } else {
-      // Update zoom callback to work with new margins
+      // Update zoom callback
       zoomRef.current.on('zoom', (event) => {
-        const transform = event.transform;
-        currentTransformRef.current = transform;
-        svg
-          .selectAll('.content-group')
-          .attr(
-            'transform',
-            `translate(${margin.left + transform.x},${
-              verticalOffset + transform.y
-            }) scale(${transform.k})`
-          );
+        currentTransformRef.current = event.transform;
+        g.attr('transform', event.transform.toString());
       });
+
+      // Recalculate transform preserving scale and relative pan
+      const oldTransform = currentTransformRef.current;
+      const newTransform = d3.zoomIdentity
+        .translate(margin.left, verticalOffset)
+        .scale(oldTransform.k)
+        .translate(
+          (oldTransform.x - margin.left) / oldTransform.k,
+          (oldTransform.y - verticalOffset) / oldTransform.k
+        );
+      svg.call(zoomRef.current.transform, newTransform);
     }
   }, [
     filteredData,
