@@ -62,11 +62,11 @@ export function NodeInfoPanel({ node, solutions }: NodeInfoPanelProps) {
         <strong>Candidate Vertex:</strong>
         <span>{node.candidate_vertex}</span>
 
-        <strong>X Size:</strong>
-        <span>{node.x_size}</span>
+        <strong>X Set:</strong>
+        <span style={{ fontFamily: 'monospace' }}>{node.x_set || 'empty'}</span>
 
-        <strong>P Size:</strong>
-        <span>{node.p_size}</span>
+        <strong>P Set:</strong>
+        <span style={{ fontFamily: 'monospace' }}>{node.p_set || 'empty'}</span>
 
         <strong>Pruned by Pivot:</strong>
         <span style={{

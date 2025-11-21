@@ -7,8 +7,8 @@ export type TreeNode = {
   depth: number;
   candidate_vertex: number;
   current_clique: string;
-  x_size: number;
-  p_size: number;
+  x_set: string;
+  p_set: string;
   pruned_by_pivot: boolean;
   children?: TreeNode[];
 }

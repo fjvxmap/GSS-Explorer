@@ -14,8 +14,8 @@ struct SearchTreeNode {
     int creation_order;
     int depth;
     vector<int> current_clique;  // R set
-    int p_size;  // size of P set
-    int x_size;  // size of X set
+    vector<int> p_set;  // P set (candidate vertices)
+    vector<int> x_set;  // X set (excluded vertices)
     int candidate_vertex;  // the vertex being added to R
     bool pruned_by_pivot;  // true if this node would not be explored with pivoting
 };
@@ -120,8 +120,17 @@ public:
             node.creation_order = search_tree_nodes.size();
             node.depth = depth;
             node.current_clique = clique;
-            node.x_size = p_idx - x_idx;
-            node.p_size = e_idx - p_idx;
+
+            // Store actual P and X sets
+            node.x_set.clear();
+            for (int i = x_idx; i < p_idx; i++) {
+                node.x_set.push_back(v_list[i]);
+            }
+            node.p_set.clear();
+            for (int i = p_idx; i < e_idx; i++) {
+                node.p_set.push_back(v_list[i]);
+            }
+
             node.candidate_vertex = cand_vertex;
             node.cliques_in_subtree = 0;
             node.pruned_by_pivot = is_pruned;
@@ -473,7 +482,7 @@ public:
 
         // Write CSV header
         csv_file << "node_id,parent_id,children_ids,cliques_in_subtree,creation_order,depth,"
-                 << "candidate_vertex,current_clique,x_size,p_size,pruned_by_pivot" << endl;
+                 << "candidate_vertex,current_clique,x_set,p_set,pruned_by_pivot" << endl;
 
         // Find all root nodes (parent_id == -1) and calculate total cliques
         vector<int> root_nodes;
@@ -491,7 +500,7 @@ public:
             if (i > 0) csv_file << ";";
             csv_file << root_nodes[i];
         }
-        csv_file << "\"," << total_root_cliques << ",-1,-1,-1,\"\",0,0,false" << endl;
+        csv_file << "\"," << total_root_cliques << ",-1,-1,-1,\"\",\"\",\"\",false" << endl;
 
         // Write each actual node
         for (const auto& node : search_tree_nodes) {
@@ -519,8 +528,22 @@ public:
             }
             csv_file << "\",";
 
-            csv_file << node.x_size << ",";
-            csv_file << node.p_size << ",";
+            // X set (semicolon-separated)
+            csv_file << "\"";
+            for (size_t i = 0; i < node.x_set.size(); i++) {
+                if (i > 0) csv_file << ";";
+                csv_file << node.x_set[i];
+            }
+            csv_file << "\",";
+
+            // P set (semicolon-separated)
+            csv_file << "\"";
+            for (size_t i = 0; i < node.p_set.size(); i++) {
+                if (i > 0) csv_file << ";";
+                csv_file << node.p_set[i];
+            }
+            csv_file << "\",";
+
             csv_file << (node.pruned_by_pivot ? "true" : "false") << endl;
         }
 
