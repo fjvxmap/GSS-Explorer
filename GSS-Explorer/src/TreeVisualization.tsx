@@ -8,9 +8,12 @@ interface TreeVisualizationProps {
   currentStep: number;
   onNodeClick?: (node: TreeNode) => void;
   hidePruned: boolean;
+  showLowPruningBorder: boolean;
+  showOnlyLowPruning: boolean;
+  lowPruningThreshold: number;
 }
 
-export function TreeVisualization({ data, maxStep, currentStep, onNodeClick, hidePruned }: TreeVisualizationProps) {
+export function TreeVisualization({ data, maxStep, currentStep, onNodeClick, hidePruned, showLowPruningBorder, showOnlyLowPruning, lowPruningThreshold }: TreeVisualizationProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
@@ -72,8 +75,59 @@ export function TreeVisualization({ data, maxStep, currentStep, onNodeClick, hid
     // Get ALL nodes from full tree (for stable positions)
     const allNodes = partitionData.descendants();
 
+    // Helper function to check if node has low pruning effectiveness
+    const isLowPruning = (d: d3.HierarchyRectangularNode<TreeNode>) => {
+      const totalChildren = d.data.children_ids.length;
+      if (totalChildren > 0 && !d.data.pruned_by_pivot) {
+        const prunedChildren = d.children?.filter(child => child.data.pruned_by_pivot).length || 0;
+        const pruningRatio = prunedChildren / totalChildren;
+        return pruningRatio < (lowPruningThreshold / 100);
+      }
+      return false;
+    };
+
+    // Filter nodes if showOnlyLowPruning is enabled
+    let nodesToLayout = allNodes;
+    if (showOnlyLowPruning) {
+      // Only include root and low-pruning nodes (and their ancestors for tree structure)
+      const lowPruningNodes = new Set<d3.HierarchyRectangularNode<TreeNode>>();
+      allNodes.forEach(node => {
+        if (node.depth === 0 || isLowPruning(node)) {
+          lowPruningNodes.add(node);
+          // Add all ancestors
+          let ancestor = node.parent;
+          while (ancestor) {
+            lowPruningNodes.add(ancestor);
+            ancestor = ancestor.parent;
+          }
+        }
+      });
+      nodesToLayout = Array.from(lowPruningNodes);
+
+      // Recalculate partition for filtered nodes
+      const filteredRoot = d3.hierarchy(data, d => {
+        if (!d.children) return undefined;
+        return d.children.filter(child => {
+          const nodeInHierarchy = allNodes.find(n => n.data.node_id === child.node_id);
+          return nodeInHierarchy && lowPruningNodes.has(nodeInHierarchy);
+        });
+      });
+      filteredRoot.sum(d => d.cliques_in_subtree || 1);
+      const filteredPartition = partition(filteredRoot);
+      const filteredNodes = filteredPartition.descendants();
+
+      // Copy new angles to original nodes
+      filteredNodes.forEach(fn => {
+        const originalNode = allNodes.find(n => n.data.node_id === fn.data.node_id);
+        if (originalNode) {
+          originalNode.x0 = fn.x0;
+          originalNode.x1 = fn.x1;
+        }
+      });
+    }
+
     // Rescale angles so depth 1+ nodes use full 360 degrees
-    const depth1Nodes = allNodes.filter(d => d.depth === 1);
+    const depth1Nodes = nodesToLayout.filter(d => d.depth === 1);
     if (depth1Nodes.length > 0) {
       const minAngle = Math.min(...depth1Nodes.map(d => d.x0));
       const maxAngle = Math.max(...depth1Nodes.map(d => d.x1));
@@ -81,7 +135,7 @@ export function TreeVisualization({ data, maxStep, currentStep, onNodeClick, hid
 
       if (angleRange > 0 && angleRange < 2 * Math.PI) {
         // Rescale all non-root nodes to use full 360 degrees
-        allNodes.filter(d => d.depth > 0).forEach(d => {
+        nodesToLayout.filter(d => d.depth > 0).forEach(d => {
           d.x0 = ((d.x0 - minAngle) / angleRange) * 2 * Math.PI;
           d.x1 = ((d.x1 - minAngle) / angleRange) * 2 * Math.PI;
         });
@@ -89,9 +143,18 @@ export function TreeVisualization({ data, maxStep, currentStep, onNodeClick, hid
     }
 
     // NOW filter for rendering based on creation_order and pruned status
-    const visibleNodes = allNodes.filter(d => {
+    const visibleNodes = nodesToLayout.filter(d => {
       if (d.data.creation_order > currentStep) return false;
       if (hidePruned && d.data.pruned_by_pivot) return false;
+      if (showOnlyLowPruning && d.depth > 0 && !isLowPruning(d)) {
+        // Check if it's an ancestor of a low-pruning node
+        const hasLowPruningDescendant = (node: d3.HierarchyRectangularNode<TreeNode>): boolean => {
+          if (isLowPruning(node)) return true;
+          if (!node.children) return false;
+          return node.children.some(hasLowPruningDescendant);
+        };
+        if (!hasLowPruningDescendant(d)) return false;
+      }
       return true;
     });
 
@@ -172,14 +235,35 @@ export function TreeVisualization({ data, maxStep, currentStep, onNodeClick, hid
     cells.append('path')
       .attr('d', arc)
       .attr('fill', d => getNodeColor(d))
-      .attr('stroke', '#fff')
-      .attr('stroke-width', 0.3)
+      .attr('stroke', d => {
+        // Check if this node has low pruning effectiveness
+        if (showLowPruningBorder && isLowPruning(d)) {
+          return '#ffd700';
+        }
+        return '#fff';
+      })
+      .attr('stroke-width', d => {
+        if (showLowPruningBorder && isLowPruning(d)) {
+          return 2;
+        }
+        return 0.3;
+      })
       .style('opacity', 0.9)
       .on('mouseenter', function() {
-        d3.select(this).style('opacity', 1).attr('stroke-width', 1.5);
+        d3.select(this).style('opacity', 1).attr('stroke-width', (d: any) => {
+          if (showLowPruningBorder && isLowPruning(d)) {
+            return 3;
+          }
+          return 1.5;
+        });
       })
       .on('mouseleave', function() {
-        d3.select(this).style('opacity', 0.9).attr('stroke-width', 0.3);
+        d3.select(this).style('opacity', 0.9).attr('stroke-width', (d: any) => {
+          if (showLowPruningBorder && isLowPruning(d)) {
+            return 2;
+          }
+          return 0.3;
+        });
       });
 
     // Add text labels for larger arcs
@@ -227,7 +311,7 @@ export function TreeVisualization({ data, maxStep, currentStep, onNodeClick, hid
       });
     }
 
-  }, [data, currentStep, dimensions, onNodeClick, hidePruned]);
+  }, [data, currentStep, dimensions, onNodeClick, hidePruned, showLowPruningBorder, showOnlyLowPruning, lowPruningThreshold]);
 
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%' }}>

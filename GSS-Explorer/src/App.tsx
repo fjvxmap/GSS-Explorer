@@ -18,6 +18,9 @@ function App() {
   const [selectedNode, setSelectedNode] = useState<TreeNode | null>(null)
   const [solutions, setSolutions] = useState<string[]>([])
   const [hidePruned, setHidePruned] = useState(false)
+  const [showLowPruningBorder, setShowLowPruningBorder] = useState(true)
+  const [showOnlyLowPruning, setShowOnlyLowPruning] = useState(false)
+  const [lowPruningThreshold, setLowPruningThreshold] = useState(30)
 
   const handleFileUpload = async (csvFile: File, graphFile: File) => {
     setLoading(true)
@@ -306,7 +309,10 @@ function App() {
             padding: '10px',
             background: '#f5f5f5',
             borderRadius: '8px',
-            flexShrink: 0
+            flexShrink: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px'
           }}>
             <label style={{
               display: 'flex',
@@ -323,6 +329,49 @@ function App() {
               />
               <span>Hide Pruned Nodes (Show only non-pivot path)</span>
             </label>
+            <label style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              cursor: 'pointer',
+              fontSize: '13px'
+            }}>
+              <input
+                type="checkbox"
+                checked={showLowPruningBorder}
+                onChange={(e) => setShowLowPruningBorder(e.target.checked)}
+                style={{ cursor: 'pointer' }}
+              />
+              <span>Show Low Pruning Border</span>
+            </label>
+            <label style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              cursor: 'pointer',
+              fontSize: '13px'
+            }}>
+              <input
+                type="checkbox"
+                checked={showOnlyLowPruning}
+                onChange={(e) => setShowOnlyLowPruning(e.target.checked)}
+                style={{ cursor: 'pointer' }}
+              />
+              <span>Show Only Low Pruning Nodes</span>
+            </label>
+            <div style={{ marginTop: '4px' }}>
+              <label style={{ fontSize: '13px', display: 'block', marginBottom: '4px' }}>
+                Low Pruning Threshold: &lt;{lowPruningThreshold}%
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={lowPruningThreshold}
+                onChange={(e) => setLowPruningThreshold(Number(e.target.value))}
+                style={{ width: '100%', cursor: 'pointer' }}
+              />
+            </div>
           </div>
 
           <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
@@ -332,6 +381,9 @@ function App() {
               currentStep={currentStep}
               onNodeClick={handleNodeClick}
               hidePruned={hidePruned}
+              showLowPruningBorder={showLowPruningBorder}
+              showOnlyLowPruning={showOnlyLowPruning}
+              lowPruningThreshold={lowPruningThreshold}
             />
           </div>
         </div>
@@ -402,6 +454,16 @@ function App() {
               background: 'hsl(210, 15%, 75%)'
             }} />
             <span>Fruitless (0 cliques)</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{
+              width: '10px',
+              height: '10px',
+              borderRadius: '50%',
+              background: '#3498db',
+              border: '2px solid #ffd700'
+            }} />
+            <span>Low pruning (&lt;{lowPruningThreshold}%)</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span>Node size = cliques in subtree</span>
