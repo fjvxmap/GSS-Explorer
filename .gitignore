@@ -84,5 +84,5 @@ Thumbs.db
 *.swo
 *~
 
-# CSV output files (optional - uncomment if you want to ignore generated CSV files)
-# *.csv
+# CSV output files
+*.csv

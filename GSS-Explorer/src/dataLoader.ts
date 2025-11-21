@@ -18,8 +18,8 @@ export function parseCSV(csvText: string): TreeNode[] {
       depth: parseInt(values[5]),
       candidate_vertex: parseInt(values[6]),
       current_clique: values[7].replace(/"/g, ''),
-      x_size: parseInt(values[8]),
-      p_size: parseInt(values[9]),
+      x_set: values[8].replace(/"/g, ''),
+      p_set: values[9].replace(/"/g, ''),
       pruned_by_pivot: values[10] === 'true'
     };
 
