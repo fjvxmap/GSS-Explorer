@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import type { TreeNode } from './types';
+import type { Graph } from './graphTypes';
+import { SubgraphTooltip } from './SubgraphTooltip';
 
 interface TreeVisualizationProps {
   data: TreeNode;
@@ -9,15 +11,25 @@ interface TreeVisualizationProps {
   onNodeClick?: (node: TreeNode) => void;
   hidePruned: boolean;
   showLowPruningBorder: boolean;
+  graph?: Graph | null;
   showOnlyLowPruning: boolean;
   lowPruningThreshold: number;
 }
 
-export function TreeVisualization({ data, maxStep, currentStep, onNodeClick, hidePruned, showLowPruningBorder, showOnlyLowPruning, lowPruningThreshold }: TreeVisualizationProps) {
+export function TreeVisualization({ data, maxStep, currentStep, onNodeClick, hidePruned, showLowPruningBorder, showOnlyLowPruning, lowPruningThreshold, graph }: TreeVisualizationProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
-  const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+  const [zoomLevel, setZoomLevel] = useState(1.25);
+  const [panX, setPanX] = useState(0);
+  const [panY, setPanY] = useState(0);
+  const [hoveredNode, setHoveredNode] = useState<TreeNode | null>(null);
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const [showHoverTooltip, setShowHoverTooltip] = useState(true);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const centerXRef = useRef<number>(0);
+  const centerYRef = useRef<number>(0);
 
   // Update dimensions based on container size
   useEffect(() => {
@@ -49,16 +61,14 @@ export function TreeVisualization({ data, maxStep, currentStep, onNodeClick, hid
     const centerY = dimensions.height / 2;
     const radius = Math.min(dimensions.width, dimensions.height) / 2 - 50;
 
+    centerXRef.current = centerX;
+    centerYRef.current = centerY;
+
     const g = svg.append('g')
       .attr('class', 'content-group');
 
-    // Apply current zoom transform if it exists
-    if (zoomRef.current) {
-      const currentTransform = d3.zoomTransform(svg.node()!);
-      g.attr('transform', `translate(${centerX + currentTransform.x},${centerY + currentTransform.y}) scale(${currentTransform.k})`);
-    } else {
-      g.attr('transform', `translate(${centerX},${centerY})`);
-    }
+    // Apply zoom and pan transform
+    g.attr('transform', `translate(${centerX + panX},${centerY + panY}) scale(${zoomLevel})`);
 
     // Convert to hierarchy - ALWAYS use all children to maintain positions
     const root = d3.hierarchy(data, d => d.children);
@@ -203,11 +213,21 @@ export function TreeVisualization({ data, maxStep, currentStep, onNodeClick, hid
             onNodeClick(rootNode.data);
           }
         })
-        .on('mouseenter', function() {
+        .on('mouseenter', function(event, d) {
           d3.select(this).style('opacity', 1).attr('stroke-width', 1.5);
+          if (graph && rootNode.data.current_clique && showHoverTooltip) {
+            setHoveredNode(rootNode.data);
+            setMousePos({ x: event.clientX, y: event.clientY });
+          }
+        })
+        .on('mousemove', function(event) {
+          if (hoveredNode && hoveredNode.node_id === rootNode.data.node_id) {
+            setMousePos({ x: event.clientX, y: event.clientY });
+          }
         })
         .on('mouseleave', function() {
           d3.select(this).style('opacity', 0.9).attr('stroke-width', 0.3);
+          setHoveredNode(null);
         });
     }
 
@@ -249,13 +269,22 @@ export function TreeVisualization({ data, maxStep, currentStep, onNodeClick, hid
         return 0.3;
       })
       .style('opacity', 0.9)
-      .on('mouseenter', function() {
+      .on('mouseenter', function(event, d) {
         d3.select(this).style('opacity', 1).attr('stroke-width', (d: any) => {
           if (showLowPruningBorder && isLowPruning(d)) {
             return 3;
           }
           return 1.5;
         });
+        if (graph && d.data.current_clique && showHoverTooltip) {
+          setHoveredNode(d.data);
+          setMousePos({ x: event.clientX, y: event.clientY });
+        }
+      })
+      .on('mousemove', function(event, d) {
+        if (hoveredNode && hoveredNode.node_id === d.data.node_id) {
+          setMousePos({ x: event.clientX, y: event.clientY });
+        }
       })
       .on('mouseleave', function() {
         d3.select(this).style('opacity', 0.9).attr('stroke-width', (d: any) => {
@@ -264,6 +293,7 @@ export function TreeVisualization({ data, maxStep, currentStep, onNodeClick, hid
           }
           return 0.3;
         });
+        setHoveredNode(null);
       });
 
     // Add text labels for larger arcs
@@ -290,38 +320,318 @@ export function TreeVisualization({ data, maxStep, currentStep, onNodeClick, hid
         return `${d.data.node_id}`;
       });
 
-    // Initialize zoom if not already done, or update the zoom target
-    if (!zoomRef.current) {
-      zoomRef.current = d3.zoom<SVGSVGElement, unknown>()
-        .scaleExtent([0.5, 5])
-        .on('zoom', (event) => {
-          const transform = event.transform;
-          // Apply zoom to all .content-group elements
-          svg.selectAll('.content-group')
-            .attr('transform', `translate(${centerX + transform.x},${centerY + transform.y}) scale(${transform.k})`);
-        });
+    // Update zoom and pan transform when they change
+    svg.selectAll('.content-group')
+      .transition()
+      .duration(200)
+      .attr('transform', `translate(${centerX + panX},${centerY + panY}) scale(${zoomLevel})`);
 
-      svg.call(zoomRef.current);
-    } else {
-      // Don't reset zoom, just update the zoom callback to work with new content
-      zoomRef.current.on('zoom', (event) => {
-        const transform = event.transform;
-        svg.selectAll('.content-group')
-          .attr('transform', `translate(${centerX + transform.x},${centerY + transform.y}) scale(${transform.k})`);
-      });
+  }, [data, currentStep, dimensions, onNodeClick, hidePruned, showLowPruningBorder, showOnlyLowPruning, lowPruningThreshold, zoomLevel, panX, panY, hoveredNode, graph, showHoverTooltip]);
+
+  // Handle mouse drag for panning
+  const handleMouseDown = (e: React.MouseEvent<SVGSVGElement>) => {
+    // Only allow panning on left mouse button, and not on buttons/legend
+    if (e.button === 0 && !isDragging) {
+      const target = e.target as HTMLElement;
+      // Don't start drag if clicking on buttons or legend
+      if (target.closest('button') || target.closest('[style*="position: absolute"]')) {
+        return;
+      }
+      setIsDragging(true);
+      const svg = svgRef.current;
+      if (svg) {
+        const rect = svg.getBoundingClientRect();
+        const startX = e.clientX - rect.left;
+        const startY = e.clientY - rect.top;
+        // Store the initial mouse position and current pan offset
+        setDragStart({ x: startX - panX, y: startY - panY });
+      }
+      e.preventDefault();
+      e.stopPropagation();
     }
+  };
 
-  }, [data, currentStep, dimensions, onNodeClick, hidePruned, showLowPruningBorder, showOnlyLowPruning, lowPruningThreshold]);
+  const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (isDragging) {
+      const svg = svgRef.current;
+      if (svg) {
+        const rect = svg.getBoundingClientRect();
+        const currentX = e.clientX - rect.left;
+        const currentY = e.clientY - rect.top;
+        // Calculate new pan based on mouse movement
+        setPanX(currentX - dragStart.x);
+        setPanY(currentY - dragStart.y);
+      }
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  };
+
+  const handleMouseUp = () => {
+    if (isDragging) {
+      setIsDragging(false);
+    }
+  };
+
+  const handleMouseLeave = () => {
+    // Keep dragging even when mouse leaves SVG for smoother panning
+    // Also clear hovered node when mouse leaves SVG
+    setHoveredNode(null);
+  };
+
+  // Add global mouse event listeners for smooth panning
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+      const svg = svgRef.current;
+      if (svg && isDragging) {
+        const rect = svg.getBoundingClientRect();
+        const currentX = e.clientX - rect.left;
+        const currentY = e.clientY - rect.top;
+        setPanX(currentX - dragStart.x);
+        setPanY(currentY - dragStart.y);
+      }
+    };
+
+    const handleGlobalMouseUp = () => {
+      if (isDragging) {
+        setIsDragging(false);
+      }
+    };
+
+    document.addEventListener('mousemove', handleGlobalMouseMove);
+    document.addEventListener('mouseup', handleGlobalMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleGlobalMouseMove);
+      document.removeEventListener('mouseup', handleGlobalMouseUp);
+    };
+  }, [isDragging, dragStart]);
+
+  const handleZoomIn = () => {
+    setZoomLevel(prev => Math.min(3, prev + 0.1));
+  };
+
+  const handleZoomOut = () => {
+    setZoomLevel(prev => Math.max(0.5, prev - 0.1));
+  };
+
+  const handleZoomReset = () => {
+    setZoomLevel(1.25);
+    setPanX(0);
+    setPanY(0);
+  };
 
   return (
-    <div ref={containerRef} style={{ width: '100%', height: '100%' }}>
+    <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative', background: '#fafafa', border: '1px solid #ddd', borderRadius: '8px' }}>
+      {/* Legend in top-left */}
+      <div 
+        style={{
+          position: 'absolute',
+          top: '8px',
+          left: '8px',
+          background: 'rgba(255, 255, 255, 0.95)',
+          padding: '6px 8px',
+          borderRadius: '6px',
+          fontSize: '14px',
+          boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+          zIndex: 10,
+          maxWidth: '220px',
+          pointerEvents: 'auto'
+        }}
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h4 style={{ margin: '0 0 4px 0', fontSize: '11px', fontWeight: 'bold' }}>Legend</h4>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <div style={{
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              background: '#3498db',
+              flexShrink: 0
+            }} />
+            <span>Depth 0</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <div style={{
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              background: '#2ecc71',
+              flexShrink: 0
+            }} />
+            <span>Depth 1</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <div style={{
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              background: '#e74c3c',
+              flexShrink: 0
+            }} />
+            <span>Pruned</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <div style={{
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              background: 'hsl(210, 15%, 75%)',
+              flexShrink: 0
+            }} />
+            <span>Fruitless</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <div style={{
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              background: '#3498db',
+              border: '2px solid #ffd700',
+              flexShrink: 0
+            }} />
+            <span>Low (&lt;{lowPruningThreshold}%)</span>
+          </div>
+          <div style={{ marginTop: '2px', fontSize: '9px', color: '#666' }}>
+            Size = cliques
+          </div>
+        </div>
+      </div>
+
       <svg
         ref={svgRef}
         style={{
-          border: '1px solid #ddd',
           background: '#fafafa',
-          display: 'block'
+          display: 'block',
+          width: '100%',
+          height: '100%',
+          cursor: isDragging ? 'grabbing' : 'grab'
         }}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseLeave}
+      />
+      {/* Hover Tooltip Toggle */}
+      <div style={{
+        position: 'absolute',
+        top: '10px',
+        right: '10px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '5px',
+        zIndex: 10
+      }}>
+        <button
+          onClick={() => setShowHoverTooltip(!showHoverTooltip)}
+          style={{
+            width: '35px',
+            height: '28px',
+            fontSize: '14px',
+            cursor: 'pointer',
+            background: showHoverTooltip ? '#2ecc71' : '#e74c3c',
+            color: 'white',
+            border: '2px solid #ddd',
+            borderRadius: '4px',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontWeight: 'bold'
+          }}
+          title={showHoverTooltip ? 'Disable hover tooltip' : 'Enable hover tooltip'}
+        >
+          {showHoverTooltip ? '👁' : '🚫'}
+        </button>
+      </div>
+      {/* Zoom Controls */}
+      <div style={{
+        position: 'absolute',
+        top: '43px',
+        right: '10px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '5px',
+        zIndex: 10
+      }}>
+        <button
+          onClick={handleZoomIn}
+          style={{
+            width: '35px',
+            height: '35px',
+            fontSize: '18px',
+            fontWeight: 'bold',
+            cursor: 'pointer',
+            background: 'white',
+            border: '2px solid #ddd',
+            borderRadius: '4px',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#333'
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.background = '#f0f0f0'}
+          onMouseLeave={(e) => e.currentTarget.style.background = 'white'}
+        >
+          +
+        </button>
+        <button
+          onClick={handleZoomOut}
+          style={{
+            width: '35px',
+            height: '35px',
+            fontSize: '18px',
+            fontWeight: 'bold',
+            cursor: 'pointer',
+            background: 'white',
+            border: '2px solid #ddd',
+            borderRadius: '4px',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#333'
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.background = '#f0f0f0'}
+          onMouseLeave={(e) => e.currentTarget.style.background = 'white'}
+        >
+          −
+        </button>
+        <button
+          onClick={handleZoomReset}
+          style={{
+            width: '35px',
+            height: '28px',
+            fontSize: '11px',
+            cursor: 'pointer',
+            background: 'white',
+            border: '2px solid #ddd',
+            borderRadius: '4px',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#333'
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.background = '#f0f0f0'}
+          onMouseLeave={(e) => e.currentTarget.style.background = 'white'}
+          title="Reset zoom"
+        >
+          ↻
+        </button>
+      </div>
+      {/* Subgraph Tooltip */}
+      <SubgraphTooltip
+        node={hoveredNode}
+        graph={graph || null}
+        x={mousePos.x}
+        y={mousePos.y}
+        visible={showHoverTooltip && hoveredNode !== null && hoveredNode.current_clique !== null && hoveredNode.current_clique.trim() !== ''}
       />
     </div>
   );

@@ -29,48 +29,48 @@ export function TimelineControl({
 
   return (
     <div style={{
-      padding: '20px',
+      padding: '6px 8px',
       background: '#f5f5f5',
-      borderRadius: '8px',
-      marginBottom: '20px'
+      borderRadius: '6px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '5px'
     }}>
-      <div style={{ marginBottom: '15px' }}>
-        <h3 style={{ margin: '0 0 10px 0' }}>Timeline Control</h3>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <button
-            onClick={onPlayPause}
-            style={{
-              padding: '8px 16px',
-              fontSize: '14px',
-              cursor: 'pointer',
-              background: isPlaying ? '#e74c3c' : '#2ecc71',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px'
-            }}
-          >
-            {isPlaying ? '⏸ Pause' : '▶ Play'}
-          </button>
-          <span style={{ fontSize: '14px', fontWeight: 'bold' }}>
-            Step: {currentStep} / {maxStep}
-          </span>
-        </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <h4 style={{ margin: 0, fontSize: '11px', minWidth: '60px', fontWeight: 'bold' }}>Timeline</h4>
+        <button
+          onClick={onPlayPause}
+          style={{
+            padding: '3px 8px',
+            fontSize: '11px',
+            cursor: 'pointer',
+            background: isPlaying ? '#e74c3c' : '#2ecc71',
+            color: 'white',
+            border: 'none',
+            borderRadius: '3px'
+          }}
+        >
+          {isPlaying ? '⏸' : '▶'}
+        </button>
+        <span style={{ fontSize: '11px', fontWeight: 'bold', minWidth: '60px' }}>
+          {currentStep} / {maxStep}
+        </span>
       </div>
 
-      <div style={{ marginBottom: '15px' }}>
+      <div>
         <input
           type="range"
           min="0"
           max={maxStep}
           value={currentStep}
           onChange={(e) => onStepChange(Number(e.target.value))}
-          style={{ width: '100%' }}
+          style={{ width: '100%', height: '5px' }}
         />
       </div>
 
-      <div>
-        <label style={{ fontSize: '14px', marginRight: '10px' }}>
-          Playback Speed: {playbackSpeed}x
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <label style={{ fontSize: '10px', minWidth: '60px' }}>
+          Speed: {playbackSpeed}x
         </label>
         <input
           type="range"
@@ -78,7 +78,7 @@ export function TimelineControl({
           max="200"
           value={playbackSpeed}
           onChange={(e) => setPlaybackSpeed(Number(e.target.value))}
-          style={{ width: '200px' }}
+          style={{ width: '100%', height: '4px' }}
         />
       </div>
     </div>

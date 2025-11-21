@@ -10,7 +10,9 @@ interface GraphVisualizationProps {
 
 export function GraphVisualization({ graph, currentNode }: GraphVisualizationProps) {
   const svgRef = useRef<SVGSVGElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [initialized, setInitialized] = useState(false);
+  const [dimensions, setDimensions] = useState({ width: 400, height: 400 });
   const nodeSelectionRef = useRef<d3.Selection<SVGCircleElement, any, any, any> | null>(null);
   const linkSelectionRef = useRef<d3.Selection<SVGLineElement, any, any, any> | null>(null);
   const labelGroupRef = useRef<d3.Selection<SVGGElement, any, any, any> | null>(null);
@@ -19,13 +21,64 @@ export function GraphVisualization({ graph, currentNode }: GraphVisualizationPro
   const svgGroupRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
   const zoomBehaviorRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
 
+  // Update dimensions based on container size
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const updateDimensions = () => {
+      if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        // Use available space minus padding for title and legend
+        const padding = 10;
+        const titleHeight = 20;
+        const legendHeight = 30;
+        const availableHeight = Math.max(0, rect.height - titleHeight - legendHeight - padding);
+        const availableWidth = Math.max(0, rect.width - padding);
+        const size = Math.min(availableWidth, availableHeight);
+        if (size > 80) { // Minimum size check
+          setDimensions({ width: size, height: size });
+        } else {
+          setDimensions({ width: 250, height: 250 }); // Default fallback
+        }
+      }
+    };
+
+    // Initial update with delay to ensure container is rendered
+    const timeoutId = setTimeout(updateDimensions, 50);
+    
+    // Update on window resize
+    window.addEventListener('resize', updateDimensions);
+    
+    // Use ResizeObserver if available for better tracking
+    let resizeObserver: ResizeObserver | null = null;
+    if (containerRef.current && window.ResizeObserver) {
+      resizeObserver = new ResizeObserver(() => {
+        setTimeout(updateDimensions, 50);
+      });
+      resizeObserver.observe(containerRef.current);
+    }
+
+    return () => {
+      clearTimeout(timeoutId);
+      window.removeEventListener('resize', updateDimensions);
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      }
+    };
+  }, [graph]);
+
   // Initialize graph once
   useEffect(() => {
     if (!svgRef.current || !graph || !graph.edges) return;
-    if (initialized) return;
+    if (dimensions.width === 0 || dimensions.height === 0) return;
+    if (initialized) {
+      // Update SVG size if already initialized
+      const svg = d3.select(svgRef.current);
+      svg.attr('width', dimensions.width).attr('height', dimensions.height);
+      return;
+    }
 
-    const width = 400;
-    const height = 400;
+    const { width, height } = dimensions;
 
     const svg = d3.select(svgRef.current)
       .attr('width', width)
@@ -127,12 +180,19 @@ export function GraphVisualization({ graph, currentNode }: GraphVisualizationPro
         originalPositionsRef.current.set(node.id, { x: node.x, y: node.y });
       });
       setInitialized(true);
-    }, 3000);
+      }, 3000);
 
     return () => {
       simulation.stop();
     };
-  }, [graph, initialized]);
+  }, [graph, initialized, dimensions]);
+
+  // Update SVG size when dimensions change after initialization
+  useEffect(() => {
+    if (!svgRef.current || !initialized || dimensions.width === 0 || dimensions.height === 0) return;
+    const svg = d3.select(svgRef.current);
+    svg.attr('width', dimensions.width).attr('height', dimensions.height);
+  }, [dimensions, initialized]);
 
   // Update colors and positions based on currentNode
   useEffect(() => {
@@ -372,17 +432,22 @@ export function GraphVisualization({ graph, currentNode }: GraphVisualizationPro
   }, [currentNode, initialized]);
 
   return (
-    <div>
-      <h4 style={{ margin: '0 0 10px 0' }}>Input Graph</h4>
-      <svg
-        ref={svgRef}
-        style={{
-          border: '1px solid #ddd',
-          background: '#fafafa',
-          borderRadius: '4px'
-        }}
-      />
-      <div style={{ marginTop: '10px', fontSize: '12px' }}>
+    <div ref={containerRef} style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <h4 style={{ margin: '0 0 6px 0', fontSize: '12px', flexShrink: 0, fontWeight: 'bold' }}>Input Graph</h4>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <svg
+          ref={svgRef}
+          style={{
+            border: '1px solid #ddd',
+            background: '#fafafa',
+            borderRadius: '4px',
+            width: '100%',
+            height: '100%',
+            minHeight: 0,
+            flex: 1
+          }}
+        />
+        <div style={{ marginTop: '6px', fontSize: '10px', flexShrink: 0 }}>
         <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
             <div style={{
@@ -412,6 +477,7 @@ export function GraphVisualization({ graph, currentNode }: GraphVisualizationPro
             <span>Excluded (X)</span>
           </div>
         </div>
+      </div>
       </div>
     </div>
   );
