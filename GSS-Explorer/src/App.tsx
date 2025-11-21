@@ -395,6 +395,15 @@ function App() {
             <span>Pruned by Pivot</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{
+              width: '10px',
+              height: '10px',
+              borderRadius: '50%',
+              background: 'hsl(210, 15%, 75%)'
+            }} />
+            <span>Fruitless (0 cliques)</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span>Node size = cliques in subtree</span>
           </div>
         </div>

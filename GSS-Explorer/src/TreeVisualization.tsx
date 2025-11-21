@@ -101,11 +101,21 @@ export function TreeVisualization({ data, maxStep, currentStep, onNodeClick, hid
 
     // Color scale with saturation based on cliques
     const getNodeColor = (d: d3.HierarchyRectangularNode<TreeNode>) => {
-      if (d.data.pruned_by_pivot) return '#e74c3c';
+      const isFruitless = d.data.cliques_in_subtree === 0;
+
+      // Pruned nodes: always keep original red color
+      if (d.data.pruned_by_pivot) {
+        return '#e74c3c';
+      }
 
       // Base colors for each depth
       const depthHues = [210, 145, 30, 270, 170, 25]; // Blue, Green, Orange, Purple, Teal, Orange-red
       const hue = depthHues[d.depth % depthHues.length];
+
+      // Fruitless nodes: very low saturation and high lightness
+      if (isFruitless) {
+        return `hsl(${hue}, 15%, 75%)`;
+      }
 
       // Saturation based on cliques_in_subtree (0-100%)
       const maxCliques = 50; // Adjust based on your data
