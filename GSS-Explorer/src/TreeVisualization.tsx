@@ -181,9 +181,14 @@ export function TreeVisualization({ data, maxStep, currentStep, onNodeClick, hid
         return '#e74c3c';
       }
 
-      // Base colors for each depth
-      const depthHues = [210, 145, 30, 270, 170, 25]; // Blue, Green, Orange, Purple, Teal, Orange-red
-      const hue = depthHues[d.depth % depthHues.length];
+      // Depth 0 (root): Blue, then Green-Brown-Purple cycling for depth 1+
+      let hue: number;
+      if (d.depth === 0) {
+        hue = 210; // Blue for root
+      } else {
+        const depthHues = [145, 30, 270]; // Green, Brown/Orange, Purple
+        hue = depthHues[(d.depth - 1) % 3];
+      }
 
       // Fruitless nodes: very low saturation and high lightness
       if (isFruitless) {
@@ -450,20 +455,40 @@ export function TreeVisualization({ data, maxStep, currentStep, onNodeClick, hid
               width: '8px',
               height: '8px',
               borderRadius: '50%',
-              background: '#3498db',
+              background: 'hsl(210, 70%, 50%)',
               flexShrink: 0
             }} />
-            <span>Depth 0</span>
+            <span>Depth 0 (root)</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             <div style={{
               width: '8px',
               height: '8px',
               borderRadius: '50%',
-              background: '#2ecc71',
+              background: 'hsl(145, 70%, 50%)',
               flexShrink: 0
             }} />
-            <span>Depth 1</span>
+            <span>Depth 1, 4, 7...</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <div style={{
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              background: 'hsl(30, 70%, 50%)',
+              flexShrink: 0
+            }} />
+            <span>Depth 2, 5, 8...</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <div style={{
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              background: 'hsl(270, 70%, 50%)',
+              flexShrink: 0
+            }} />
+            <span>Depth 3, 6, 9...</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             <div style={{

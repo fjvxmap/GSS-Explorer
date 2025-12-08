@@ -293,6 +293,13 @@ export function GraphVisualization({ graph, currentNode }: GraphVisualizationPro
           return 4;
         });
 
+      // Bring R/P/X nodes to front by re-ordering DOM elements
+      nodeSelectionRef.current.each(function(d: any) {
+        if (rSet.has(d.id) || pSet.has(d.id) || xSet.has(d.id)) {
+          (this as SVGElement).parentNode?.appendChild(this as SVGElement);
+        }
+      });
+
       linkSelectionRef.current
         .transition()
         .duration(500)
