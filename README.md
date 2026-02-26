@@ -1,6 +1,6 @@
-# Graph Search Space Visualization
+# Graph Algorithm Search Space Visualization
 
-This repository contains tools for analyzing and visualizing the search space of the Bron-Kerbosch algorithm for maximum clique enumeration.
+Tools for analyzing and visualizing the search space of the Bron-Kerbosch algorithm for maximum clique enumeration.
 
 ## Overview
 
@@ -200,11 +200,3 @@ yarn dev
 ```
 
 ---
-
-## License
-
-[Add your license here]
-
-## Authors
-
-[Add author information here]
