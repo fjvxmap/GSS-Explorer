@@ -2,6 +2,10 @@
 
 Tools for analyzing and visualizing the search space of the Bron-Kerbosch algorithm for maximum clique enumeration.
 
+<p align="center">
+  <img src="./running-example.png" width="100%" />
+</p>
+
 ## Overview
 
 The Bron-Kerbosch algorithm is a recursive backtracking algorithm used to find all maximal cliques in an undirected graph. This project provides:
